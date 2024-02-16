@@ -1,0 +1,1 @@
+gunicorn fastapi_model:app -w 4 -k uvicorn.workers.UvicornWorker --log-level=debug --preload

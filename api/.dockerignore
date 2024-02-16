@@ -1,0 +1,5 @@
+__pycache__
+.env
+best_final_model_v1.h5
+model
+data

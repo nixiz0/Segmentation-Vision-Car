@@ -1,0 +1,5 @@
+__pycache__
+.env
+.azure-secret
+data
+best_final_model_v1.h5
