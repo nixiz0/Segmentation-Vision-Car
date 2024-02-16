@@ -1,3 +1,5 @@
+import zipfile
+import io
 import streamlit as st
 import requests
 import base64
@@ -5,71 +7,78 @@ import cv2
 import numpy as np
 
 
-# Go with cd on the 'api-interface' folder
-# Start the local server with the "streamlit run api-interface.py"
-
-# Define the Local API endpoint :
-# API_ENDPOINT = 'http://localhost:8000/predict'
-
 # Define the Online API endpoint :
 API_ENDPOINT = "https://cars-api-sentiment.azurewebsites.net/predict"
 
 # Create a Streamlit app
 st.title('Interface for Image Segmentation API')
 
-# Upload the image
-uploaded_file = st.file_uploader("Choose an image", type=['jpg', 'png', 'jpeg'])
+# Upload the zip file
+uploaded_file = st.file_uploader("Choose a ZIP file", type=['zip'])
 
 if uploaded_file is not None:
-    # Convert the file to an opencv image
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, 1)
+    # Open the zip file
+    with zipfile.ZipFile(io.BytesIO(uploaded_file.getvalue()), 'r') as z:
+        # Get the list of files
+        file_list = [f for f in z.namelist() if '_leftImg8bit.png' in f]
+        mask_list = [f for f in z.namelist() if '_color.png' in f]
+        # Select an image
+        selected_image = st.selectbox('Select an image', file_list)
+        selected_mask = st.selectbox('Select a mask', mask_list)
 
-    # Display the uploaded image
-    st.image(img, channels="BGR")
+        # Open the selected image
+        with z.open(selected_image) as f:
+            # Read the image file
+            file_bytes = np.asarray(bytearray(f.read()), dtype=np.uint8)
+            img = cv2.imdecode(file_bytes, 1)
 
-    # Serialize the image
-    _, img_encoded = cv2.imencode('.png', img)
-    img_base64 = base64.b64encode(img_encoded).decode()
+            # Display the uploaded image
+            st.image(img, caption='Original Image', channels="BGR")
 
-    # Send the image to the API
-    response = requests.post(API_ENDPOINT, json={'image': img_base64})
+        # Open the selected mask
+        with z.open(selected_mask) as f:
+            # Read the mask file
+            file_bytes = np.asarray(bytearray(f.read()), dtype=np.uint8)
+            mask = cv2.imdecode(file_bytes, 1)
 
-    # Get the prediction from the API response
-    prediction_base64 = response.json()['mask']
+            # Display the original mask
+            st.image(mask, caption='Original Mask', channels="BGR")
 
-    # Deserialize the prediction
-    prediction_bytes = base64.b64decode(prediction_base64)
-    prediction = np.frombuffer(prediction_bytes, dtype=np.float32)
+        # Serialize the image
+        _, img_encoded = cv2.imencode('.png', img)
+        img_base64 = base64.b64encode(img_encoded).decode()
 
-    # Reshape the prediction to its original shape
-    prediction_shape = (256, 256, 8) 
-    prediction = prediction.reshape(prediction_shape)
+        if st.button('Predict'):
+            # Send the image to the API
+            response = requests.post(API_ENDPOINT, json={'image': img_base64})
 
-    # Get the original image shape
-    original_shape = img.shape[:2]
+            # Get the prediction from the API response
+            prediction_base64 = response.json()['mask']
 
-    # Resize the prediction to the original image shape
-    prediction_resized = cv2.resize(prediction, original_shape[::-1])
+            # Deserialize the prediction
+            prediction_bytes = base64.b64decode(prediction_base64)
+            prediction = np.frombuffer(prediction_bytes, dtype=np.float32)
 
-    # Define colors for each category
-    label_to_num = {
-        'flat': [214, 112, 218],         # Magenta for 'flat'
-        'human': [0, 0, 255],            # Red for 'human'
-        'vehicle': [255, 0, 0],          # Blue for 'vehicle'
-        'construction': [105, 105, 105], # Gray for 'construction'
-        'object': [0, 215, 255],         # Yellow for 'object'
-        'nature': [50, 205, 50],         # Green for 'nature'
-        'sky': [235, 206, 135],          # Light blue for 'sky'
-        'void': [0, 0, 0]                # Black for 'void'
-    }
+            # Reshape the prediction to its original shape
+            prediction_shape = (256, 256, 8) 
+            prediction = prediction.reshape(prediction_shape)
+            original_shape = img.shape[:2]
+            prediction_resized = cv2.resize(prediction, original_shape[::-1])
+            
+            label_to_num = {
+                'flat': [214, 112, 218],         # Magenta for 'flat'
+                'human': [0, 0, 255],            # Red for 'human'
+                'vehicle': [255, 0, 0],          # Blue for 'vehicle'
+                'construction': [105, 105, 105], # Gray for 'construction'
+                'object': [0, 215, 255],         # Yellow for 'object'
+                'nature': [50, 205, 50],         # Green for 'nature'
+                'sky': [235, 206, 135],          # Light blue for 'sky'
+                'void': [0, 0, 0]                # Black for 'void'
+            }
 
-    # Create an empty image with the same shape as the original image
-    colored_prediction = np.zeros((original_shape[0], original_shape[1], 3), dtype=np.uint8)
+            colored_prediction = np.zeros((original_shape[0], original_shape[1], 3), dtype=np.uint8)
 
-    # Assign colors based on prediction
-    for i, (label, color) in enumerate(label_to_num.items()):
-        colored_prediction[prediction_resized[..., i] > 0.45] = color
+            for i, (label, color) in enumerate(label_to_num.items()):
+                colored_prediction[prediction_resized[..., i] > 0.45] = color
 
-    # Display the colored prediction
-    st.image(colored_prediction, caption='Colored API Prediction', channels="BGR")
+            st.image(colored_prediction, caption='Colored API Prediction', channels="BGR")
